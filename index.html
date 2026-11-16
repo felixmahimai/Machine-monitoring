@@ -1,0 +1,623 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Newall machine monitoring setup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* Layout idea: a shop-floor manual. Sticky step rail on top, then one panel per step: picture left, short numbered actions right, tick boxes that remember progress. */
+:root{
+  --bg:#eceeec; --panel:#ffffff; --ink:#1b2129; --ink-2:#4b5664; --line:#cfd5db;
+  --accent:#d95f24; --accent-tint:#fbe3d6; --screen:#17212b; --screen-ink:#9fe8b4;
+  --mbody:#dde3e8; --ok:#2f9a58; --warn:#c98b14; --bad:#c9412f;
+  --display:"Barlow Condensed","Arial Narrow",sans-serif;
+  --body:"IBM Plex Sans",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#10151a; --panel:#182028; --ink:#e6eaee; --ink-2:#a3aebb; --line:#2c3843;
+    --accent:#f07a3f; --accent-tint:#3a2419; --screen:#0a0f13; --screen-ink:#8fe0a6;
+    --mbody:#26303a; --ok:#47b874; --warn:#e0a634; --bad:#e2604e; color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#10151a; --panel:#182028; --ink:#e6eaee; --ink-2:#a3aebb; --line:#2c3843;
+  --accent:#f07a3f; --accent-tint:#3a2419; --screen:#0a0f13; --screen-ink:#8fe0a6;
+  --mbody:#26303a; --ok:#47b874; --warn:#e0a634; --bad:#e2604e; color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:16px;line-height:1.55}
+.wrap{max-width:1180px;margin:0 auto;padding:0 20px}
+header.top{padding:28px 0 12px}
+.kicker{font-family:var(--mono);font-size:13px;color:var(--accent);letter-spacing:.04em}
+h1{font-family:var(--display);font-weight:600;font-size:clamp(34px,5vw,52px);line-height:1.02;margin:6px 0 8px;text-wrap:balance}
+.lede{max-width:66ch;color:var(--ink-2);margin:0}
+.progress{display:flex;align-items:center;gap:12px;margin-top:16px;font-size:14px;color:var(--ink-2)}
+.bar{flex:1;max-width:340px;height:8px;background:var(--line);border-radius:6px;overflow:hidden}
+.bar i{display:block;height:100%;width:0;background:var(--accent);transition:width .3s}
+nav.rail{position:sticky;top:0;z-index:5;background:var(--bg);border-bottom:1px solid var(--line);padding:10px 0}
+.chips{display:flex;gap:8px;overflow-x:auto;scrollbar-width:thin}
+.chip{flex:0 0 auto;display:flex;align-items:center;gap:6px;padding:6px 12px;border:1px solid var(--line);border-radius:999px;background:var(--panel);color:var(--ink);text-decoration:none;font-size:14px;white-space:nowrap}
+.chip b{font-family:var(--display);font-size:17px;font-weight:600;color:var(--accent)}
+.chip.done{border-color:var(--ok)}
+.chip.done b::after{content:" \2713";color:var(--ok)}
+.chip:focus-visible,.check input:focus-visible+span{outline:2px solid var(--accent);outline-offset:2px}
+main{padding:18px 0 60px;display:flex;flex-direction:column;gap:22px}
+section.step{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:22px;scroll-margin-top:70px}
+.head{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:14px}
+.num{font-family:var(--display);font-size:44px;font-weight:600;line-height:.9;color:var(--accent);min-width:52px}
+.head h2{font-family:var(--display);font-weight:600;font-size:30px;line-height:1.05;margin:0;text-wrap:balance}
+.who{font-size:13px;padding:3px 10px;border-radius:999px;background:var(--accent-tint);color:var(--ink)}
+.grid{display:grid;grid-template-columns:1.15fr 1fr;gap:24px;align-items:start}
+.grid.wide{grid-template-columns:1fr}
+figure{margin:0}
+figure svg{width:100%;height:auto;display:block;color:var(--ink-2)}
+figcaption{font-size:13.5px;color:var(--ink-2);margin-top:8px}
+ol.do{margin:0;padding:0;list-style:none;counter-reset:d;display:flex;flex-direction:column;gap:10px}
+ol.do li{counter-increment:d;display:grid;grid-template-columns:28px 1fr;gap:10px;align-items:start}
+ol.do li::before{content:counter(d);font-family:var(--display);font-weight:600;font-size:18px;width:26px;height:26px;border-radius:50%;background:var(--ink);color:var(--panel);display:grid;place-items:center;line-height:1}
+.check{display:flex;gap:10px;align-items:flex-start;cursor:pointer}
+.check input{position:absolute;opacity:0;width:1px;height:1px}
+.check span.box{flex:0 0 20px;height:20px;border:2px solid var(--ink-2);border-radius:5px;margin-top:2px;display:grid;place-items:center}
+.check input:checked+span.box{background:var(--ok);border-color:var(--ok)}
+.check input:checked+span.box::after{content:"";width:5px;height:10px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg) translate(-1px,-1px)}
+.check input:checked~span.t{color:var(--ink-2);text-decoration:line-through;text-decoration-color:var(--line)}
+.ok{margin-top:14px;padding:10px 14px;border-left:4px solid var(--ok);background:var(--bg);border-radius:0;font-size:14.5px}
+.warn{margin-top:10px;padding:10px 14px;border-left:4px solid var(--warn);background:var(--bg);border-radius:0;font-size:14.5px}
+code,.mono{font-family:var(--mono);font-size:.9em}
+pre{font-family:var(--mono);font-size:13px;background:var(--screen);color:var(--screen-ink);padding:12px 14px;border-radius:10px;overflow-x:auto;margin:10px 0 0;line-height:1.45}
+table{border-collapse:collapse;width:100%;font-size:14px;margin-top:10px}
+th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-weight:600;color:var(--ink-2)}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:13px;color:var(--ink-2);margin-top:8px}
+.legend i{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+footer{color:var(--ink-2);font-size:13px;padding-bottom:40px}
+/* svg roles */
+svg text{fill:var(--ink);font-family:var(--body);font-size:13px}
+svg .sm{font-size:11.5px;fill:var(--ink-2)}
+svg .b6{font-weight:600}
+svg .mn{font-family:var(--mono);font-size:12px}
+svg .st{fill:var(--screen-ink);font-family:var(--mono);font-size:12px}
+svg .ln{stroke:var(--ink-2);fill:none;stroke-width:1.5}
+svg .dash{stroke:var(--ink-2);fill:none;stroke-width:1.2;stroke-dasharray:4 4}
+svg .cable{stroke:var(--accent);fill:none;stroke-width:3;stroke-linecap:round}
+svg .box{fill:var(--panel);stroke:var(--ink-2);stroke-width:1.5}
+svg .mb{fill:var(--mbody);stroke:var(--ink-2);stroke-width:1.5}
+svg .acc{fill:var(--accent-tint);stroke:var(--accent);stroke-width:2}
+svg .accs{fill:none;stroke:var(--accent);stroke-width:3}
+svg .scr{fill:var(--screen)}
+svg .bgf{fill:var(--bg);stroke:var(--line);stroke-width:1.5}
+svg .g{fill:var(--ok)} svg .a{fill:var(--warn)} svg .r{fill:var(--bad)}
+svg .tw{fill:#fff;font-size:12px;font-weight:600}
+@media (max-width:860px){.grid{grid-template-columns:1fr}.num{font-size:36px}.head h2{font-size:26px}}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<header class="top wrap">
+  <div class="kicker">NEWALL ENGINEERING WORKS · SHOP FLOOR</div>
+  <h1>Machine monitoring setup, step by step</h1>
+  <p class="lede">Follow the panels in order. Each one shows where things go, the actions to take, and what "working" looks like. Tick the boxes as you go; your progress stays on this device.</p>
+  <div class="progress"><div class="bar"><i id="pbar"></i></div><span id="ptext">0 of 0 done</span></div>
+</header>
+
+<nav class="rail" aria-label="Steps">
+  <div class="wrap chips" id="chips">
+    <a class="chip" href="#overview" data-s="overview"><b>0</b>Big picture</a>
+    <a class="chip" href="#survey" data-s="survey"><b>1</b>Survey</a>
+    <a class="chip" href="#network" data-s="network"><b>2</b>Network</a>
+    <a class="chip" href="#type-a" data-s="type-a"><b>3</b>Newer CNC</a>
+    <a class="chip" href="#type-b" data-s="type-b"><b>4</b>Older CNC</a>
+    <a class="chip" href="#type-c" data-s="type-c"><b>5</b>Manual machine</a>
+    <a class="chip" href="#collector" data-s="collector"><b>6</b>Collector PC</a>
+    <a class="chip" href="#cloud" data-s="cloud"><b>7</b>Cloud dashboard</a>
+    <a class="chip" href="#tablet" data-s="tablet"><b>8</b>Tablets</a>
+    <a class="chip" href="#pilot" data-s="pilot"><b>9</b>Pilot</a>
+  </div>
+</nav>
+
+<main class="wrap">
+
+<!-- 0 -->
+<section class="step" id="overview">
+  <div class="head"><span class="num">0</span><h2>The big picture</h2><span class="who">Read first</span></div>
+  <div class="grid wide">
+    <figure>
+      <svg viewBox="0 0 900 330" role="img" aria-label="Machines connect to a network switch, then the collector PC, then the router, then the cloud portal and dashboards">
+        <defs><marker id="ar0" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="currentColor"/></marker></defs>
+        <!-- machines -->
+        <rect class="mb" x="20" y="22" width="110" height="58" rx="6"/><rect class="scr" x="104" y="30" width="18" height="28" rx="2"/><rect x="104" y="64" width="18" height="6" fill="var(--accent)"/>
+        <text x="20" y="98" class="b6">Newer CNC (7)</text><text x="20" y="113" class="sm">cable to built-in port</text>
+        <rect class="mb" x="20" y="132" width="110" height="58" rx="6"/><rect class="scr" x="104" y="140" width="18" height="28" rx="2"/><rect class="acc" x="40" y="146" width="34" height="26" rx="3"/>
+        <text x="20" y="208" class="b6">Older CNC</text><text x="20" y="223" class="sm">sensor node in cabinet</text>
+        <rect class="mb" x="20" y="252" width="110" height="20" rx="3"/><rect class="mb" x="20" y="232" width="34" height="22" rx="3"/><circle cx="64" cy="243" r="9" class="mb"/><circle cx="96" cy="262" r="7" class="accs"/>
+        <text x="20" y="290" class="b6">Manual machine</text><text x="20" y="305" class="sm">clamp-on current sensor</text>
+        <path class="cable" d="M135 51 C190 51 190 150 228 156"/>
+        <path class="cable" d="M135 161 H228"/>
+        <path class="cable" d="M135 262 C190 262 190 170 228 166"/>
+        <!-- switch -->
+        <rect class="box" x="230" y="135" width="110" height="50" rx="6"/>
+        <rect x="244" y="165" width="10" height="8" fill="var(--ink-2)"/><rect x="258" y="165" width="10" height="8" fill="var(--ink-2)"/><rect x="272" y="165" width="10" height="8" fill="var(--ink-2)"/><rect x="286" y="165" width="10" height="8" fill="var(--ink-2)"/><rect x="300" y="165" width="10" height="8" fill="var(--ink-2)"/><rect x="314" y="165" width="10" height="8" fill="var(--ink-2)"/>
+        <text x="285" y="156" text-anchor="middle" class="b6">Switch</text>
+        <line class="ln" x1="340" y1="160" x2="372" y2="160" marker-end="url(#ar0)"/>
+        <!-- pc -->
+        <rect class="box" x="375" y="125" width="110" height="70" rx="6"/>
+        <text x="430" y="155" text-anchor="middle" class="b6">Collector PC</text><text x="430" y="172" text-anchor="middle" class="sm">reads and sends</text>
+        <line class="ln" x1="485" y1="160" x2="517" y2="160" marker-end="url(#ar0)"/>
+        <line class="ln" x1="430" y1="195" x2="430" y2="238" marker-end="url(#ar0)"/>
+        <rect class="box" x="380" y="240" width="100" height="56" rx="4"/><rect class="scr" x="388" y="247" width="84" height="38" rx="2"/><rect class="g" x="394" y="253" width="22" height="12" rx="2"/><rect class="a" x="420" y="253" width="22" height="12" rx="2"/><rect class="r" x="446" y="253" width="20" height="12" rx="2"/>
+        <text x="430" y="315" text-anchor="middle" class="sm">Shop-floor TV (works offline)</text>
+        <!-- router -->
+        <rect class="box" x="520" y="135" width="104" height="50" rx="6"/>
+        <text x="572" y="156" text-anchor="middle" class="b6">Router</text><text x="572" y="172" text-anchor="middle" class="sm">outbound only</text>
+        <line class="ln" x1="624" y1="160" x2="656" y2="160" marker-end="url(#ar0)"/>
+        <!-- cloud -->
+        <path class="acc" d="M680 190 H770 a24 24 0 0 0 0 -48 a30 30 0 0 0 -56 -10 a22 22 0 0 0 -34 22 a18 18 0 0 0 0 36z"/>
+        <text x="722" y="172" text-anchor="middle" class="b6">Cloud portal</text>
+        <line class="ln" x1="796" y1="160" x2="818" y2="160" marker-end="url(#ar0)"/>
+        <!-- dashboard -->
+        <rect class="box" x="820" y="128" width="72" height="50" rx="4"/><rect x="812" y="178" width="88" height="6" rx="2" fill="var(--ink-2)"/>
+        <rect class="g" x="828" y="136" width="16" height="10" rx="2"/><rect class="g" x="848" y="136" width="16" height="10" rx="2"/><rect class="r" x="868" y="136" width="16" height="10" rx="2"/><rect class="a" x="828" y="150" width="16" height="10" rx="2"/><rect class="g" x="848" y="150" width="16" height="10" rx="2"/>
+        <text x="856" y="204" text-anchor="middle" class="sm">Dashboards</text>
+        <!-- tablet -->
+        <rect class="box" x="696" y="240" width="56" height="70" rx="8"/><rect class="acc" x="704" y="252" width="40" height="10" rx="2"/><rect class="bgf" x="704" y="266" width="40" height="10" rx="2"/><rect class="bgf" x="704" y="280" width="40" height="10" rx="2"/>
+        <line class="ln" x1="724" y1="238" x2="724" y2="196" marker-end="url(#ar0)"/>
+        <text x="764" y="280" class="sm">Operator tablets</text><text x="764" y="295" class="sm">(why it stopped)</text>
+        <!-- fence -->
+        <line class="dash" x1="644" y1="20" x2="644" y2="320"/>
+        <text x="634" y="34" text-anchor="end" class="sm">Factory</text><text x="654" y="34" class="sm">Internet</text>
+      </svg>
+      <figcaption>Every machine reports to one collector PC. Only that PC talks to the internet, and nothing outside can reach a machine.</figcaption>
+    </figure>
+    <table>
+      <tr><th>Machine type</th><th>Which machines</th><th>What you fit</th><th>Panel</th></tr>
+      <tr><td>Newer CNC</td><td>4 VMCs, Puma 4100L, PV 9300, Super Jobber 500</td><td>One network cable. Nothing mounted.</td><td>Step 3</td></tr>
+      <tr><td>Older CNC</td><td>Ace LT lathe; Puma V550 if it has no built-in port</td><td>Sensor node in the electrical cabinet</td><td>Step 4</td></tr>
+      <tr><td>Manual machine</td><td>Conventional lathes, drills</td><td>Clamp-on current sensor and a "part done" button</td><td>Step 5</td></tr>
+    </table>
+  </div>
+</section>
+
+<!-- 1 -->
+<section class="step" id="survey">
+  <div class="head"><span class="num">1</span><h2>Survey every machine</h2><span class="who">You + maintenance in-charge · one shift</span></div>
+  <div class="grid">
+    <figure>
+      <svg viewBox="0 0 560 330" role="img" aria-label="FANUC controller with the network settings screen and the keys to press">
+        <rect class="mb" x="20" y="16" width="340" height="300" rx="10"/>
+        <text x="40" y="38" class="sm b6">FANUC Series 0i-MF</text>
+        <rect class="scr" x="40" y="48" width="212" height="146" rx="4"/>
+        <text x="52" y="72" class="st">NETWORK SETTING</text>
+        <rect x="48" y="84" width="126" height="20" rx="2" fill="var(--accent)"/>
+        <text x="54" y="98" class="st" style="fill:#fff">EMBED PORT</text>
+        <text x="52" y="126" class="st">COMMON   FOCAS2</text>
+        <text x="52" y="150" class="st">IP 192.168.50.21</text>
+        <text x="52" y="174" class="st">PORT 8193</text>
+        <rect class="box" x="262" y="48" width="84" height="146" rx="4"/>
+        <g fill="var(--line)"><rect x="270" y="56" width="18" height="16" rx="2"/><rect x="292" y="56" width="18" height="16" rx="2"/><rect x="314" y="56" width="18" height="16" rx="2"/><rect x="270" y="78" width="18" height="16" rx="2"/><rect x="292" y="78" width="18" height="16" rx="2"/><rect x="314" y="78" width="18" height="16" rx="2"/><rect x="270" y="100" width="18" height="16" rx="2"/><rect x="292" y="100" width="18" height="16" rx="2"/><rect x="314" y="100" width="18" height="16" rx="2"/><rect x="270" y="122" width="18" height="16" rx="2"/><rect x="292" y="122" width="18" height="16" rx="2"/><rect x="314" y="122" width="18" height="16" rx="2"/></g>
+        <rect x="270" y="150" width="62" height="20" rx="3" fill="var(--accent)"/>
+        <text x="301" y="164" text-anchor="middle" class="tw">SYSTEM</text>
+        <g fill="var(--line)"><rect x="40" y="204" width="30" height="14" rx="2"/><rect x="76" y="204" width="30" height="14" rx="2"/><rect x="112" y="204" width="30" height="14" rx="2"/><rect x="148" y="204" width="30" height="14" rx="2"/><rect x="184" y="204" width="30" height="14" rx="2"/><rect x="220" y="204" width="30" height="14" rx="2"/></g>
+        <circle cx="80" cy="270" r="20" class="box"/><circle cx="150" cy="270" r="20" class="box"/><circle cx="220" cy="270" r="20" class="box"/><circle cx="300" cy="268" r="24" fill="var(--bad)"/>
+        <!-- callouts -->
+        <line class="dash" x1="150" y1="34" x2="388" y2="34"/>
+        <text x="392" y="38" class="b6">1 Read the model</text><text x="392" y="54" class="sm">on the screen frame</text>
+        <line class="dash" x1="332" y1="160" x2="388" y2="160"/>
+        <text x="392" y="156" class="b6">2 Press SYSTEM</text><text x="392" y="172" class="sm">then page to the network key</text>
+        <line class="dash" x1="174" y1="94" x2="388" y2="98"/>
+        <text x="392" y="94" class="b6">3 EMBED / EMBDD shown?</text><text x="392" y="110" class="sm">Yes = built-in port, type A</text><text x="392" y="125" class="sm">Only PCMCIA = type B</text>
+        <line class="dash" x1="180" y1="146" x2="388" y2="226"/>
+        <text x="392" y="226" class="b6">4 Note any IP</text><text x="392" y="242" class="sm">already set (e.g. by AMS</text><text x="392" y="257" class="sm">MachineConnect)</text>
+      </svg>
+      <figcaption>The two-minute check on each controller. Do not change any setting during the survey.</figcaption>
+    </figure>
+    <div>
+      <ol class="do">
+        <li><label class="check"><input type="checkbox" data-k="s1-1"><span class="box"></span><span class="t">Walk the floor with the maintenance in-charge and list every machine, CNC and manual.</span></label></li>
+        <li><label class="check"><input type="checkbox" data-k="s1-2"><span class="box"></span><span class="t">On each CNC, note the controller model and whether the network screen shows EMBED or EMBDD.</span></label></li>
+        <li><label class="check"><input type="checkbox" data-k="s1-3"><span class="box"></span><span class="t">Find the network port: behind the screen, on the panel, or on the control board in the cabinet.</span></label></li>
+        <li><label class="check"><input type="checkbox" data-k="s1-4"><span class="box"></span><span class="t">Measure the cable distance from each machine to where the network cabinet will go.</span></label></li>
+        <li><label class="check"><input type="checkbox" data-k="s1-5"><span class="box"></span><span class="t">Give each machine its address from the plan below and write it on a label.</span></label></li>
+      </ol>
+      <table>
+        <tr><th>Device</th><th>Address</th></tr>
+        <tr><td>Switch</td><td class="mono">192.168.50.2</td></tr>
+        <tr><td>Collector PC</td><td class="mono">192.168.50.10</td></tr>
+        <tr><td>CNC machines</td><td class="mono">192.168.50.21 to .39</td></tr>
+        <tr><td>Sensor nodes</td><td class="mono">192.168.50.101 to .149</td></tr>
+        <tr><td>Mask / gateway</td><td class="mono">255.255.255.0 / blank</td></tr>
+      </table>
+      <div class="ok">Done when every machine has a type (A, B or C), a port location, a cable length and an address.</div>
+    </div>
+  </div>
+</section>
+
+<!-- 2 -->
+<section class="step" id="network">
+  <div class="head"><span class="num">2</span><h2>Network cabinet and cables</h2><span class="who">You + electrician / network installer</span></div>
+  <div class="grid">
+    <figure>
+      <svg viewBox="0 0 560 340" role="img" aria-label="Wall cabinet holding router, switch, collector PC and UPS, with one cable running to each machine">
+        <rect class="bgf" x="24" y="14" width="250" height="312" rx="8"/>
+        <text x="40" y="36" class="sm b6">Lockable wall cabinet</text>
+        <rect class="box" x="42" y="48" width="214" height="38" rx="4"/><text x="56" y="72" class="b6">Router</text><text x="250" y="72" text-anchor="end" class="sm">to internet</text>
+        <rect class="box" x="42" y="104" width="214" height="44" rx="4"/><text x="56" y="124" class="b6">Switch</text>
+        <g fill="var(--ink-2)"><rect x="56" y="132" width="12" height="9"/><rect x="74" y="132" width="12" height="9"/><rect x="92" y="132" width="12" height="9"/><rect x="110" y="132" width="12" height="9"/><rect x="128" y="132" width="12" height="9"/><rect x="146" y="132" width="12" height="9"/><rect x="164" y="132" width="12" height="9"/><rect x="182" y="132" width="12" height="9"/></g>
+        <rect class="acc" x="42" y="166" width="214" height="64" rx="4"/><text x="56" y="190" class="b6">Collector PC</text>
+        <rect x="200" y="202" width="14" height="10" fill="var(--ink-2)"/><text x="207" y="224" text-anchor="middle" class="sm">1</text>
+        <rect x="222" y="202" width="14" height="10" fill="var(--ink-2)"/><text x="229" y="224" text-anchor="middle" class="sm">2</text>
+        <rect class="box" x="42" y="248" width="214" height="58" rx="4"/><text x="56" y="272" class="b6">UPS</text><text x="56" y="290" class="sm">feeds PC, switch, router</text>
+        <path class="ln" d="M207 202 V148"/><path class="ln" d="M229 202 V188 H262 V67 H256"/>
+        <!-- cables out -->
+        <path class="cable" d="M200 126 C320 126 330 70 390 70"/>
+        <path class="cable" d="M210 128 C320 128 330 130 390 130"/>
+        <path class="cable" d="M220 130 C320 130 330 190 390 190"/>
+        <rect class="mb" x="392" y="56" width="120" height="30" rx="4"/><text x="452" y="76" text-anchor="middle" class="b6">M/C 18</text>
+        <rect class="mb" x="392" y="116" width="120" height="30" rx="4"/><text x="452" y="136" text-anchor="middle" class="b6">Puma 4100L</text>
+        <rect class="mb" x="392" y="176" width="120" height="30" rx="4"/><text x="452" y="196" text-anchor="middle" class="b6">PV 9300</text>
+        <text x="392" y="226" class="sm">one shielded CAT6 cable per</text><text x="392" y="241" class="sm">machine, labelled both ends</text>
+        <rect x="300" y="262" width="236" height="56" rx="6" fill="none" stroke="var(--warn)" stroke-width="1.5"/>
+        <text x="312" y="284" class="b6">Keep 30 cm from motor cables</text><text x="312" y="302" class="sm">cross power cables at right angles</text>
+      </svg>
+      <figcaption>Port 1 of the PC goes to the machine switch, port 2 to the router. The two networks never join.</figcaption>
+    </figure>
+    <div>
+      <ol class="do">
+        <li><label class="check"><input type="checkbox" data-k="s2-1"><span class="box"></span><span class="t">Mount a lockable cabinet central to the machines, away from coolant, on a clean power socket.</span></label></li>
+        <li><label class="check"><input type="checkbox" data-k="s2-2"><span class="box"></span><span class="t">Fit router, switch, collector PC and UPS inside. Plug PC, switch and router into the UPS.</span></label></li>
+        <li><label class="check"><input type="checkbox" data-k="s2-3"><span class="box"></span><span class="t">Run one shielded CAT6 cable per machine in metal tray or conduit.</span></label></li>
+        <li><label class="check"><input type="checkbox" data-k="s2-4"><span class="box"></span><span class="t">Fit shielded plugs, label both ends with the machine number, and test every cable.</span></label></li>
+        <li><label class="check"><input type="checkbox" data-k="s2-5"><span class="box"></span><span class="t">Set the switch to 192.168.50.2, change its password, keep it off the office network.</span></label></li>
+      </ol>
+      <div class="warn">If the old bay is more than about 90 m of cable away, put a second switch there and link the two switches.</div>
+      <div class="ok">Done when every cable tests good and is labelled, and the cabinet is powered from the UPS.</div>
+    </div>
+  </div>
+</section>
+
+<!-- 3 -->
+<section class="step" id="type-a">
+  <div class="head"><span class="num">3</span><h2>Connect a newer CNC (type A)</h2><span class="who">Maintenance + machine maker's engineer</span></div>
+  <div class="grid">
+    <figure>
+      <svg viewBox="0 0 560 330" role="img" aria-label="Network cable from the CNC controller's built-in port to the switch, and the settings to enter">
+        <rect class="mb" x="20" y="40" width="250" height="236" rx="10"/>
+        <rect class="bgf" x="40" y="70" width="130" height="120" rx="6"/><text x="105" y="135" text-anchor="middle" class="sm">machine door</text>
+        <rect class="box" x="186" y="58" width="72" height="140" rx="6"/><rect class="scr" x="194" y="66" width="56" height="44" rx="3"/>
+        <g fill="var(--line)"><rect x="196" y="118" width="14" height="10"/><rect x="214" y="118" width="14" height="10"/><rect x="232" y="118" width="14" height="10"/><rect x="196" y="132" width="14" height="10"/><rect x="214" y="132" width="14" height="10"/><rect x="232" y="132" width="14" height="10"/></g>
+        <rect x="214" y="176" width="16" height="12" fill="var(--accent)"/>
+        <text x="20" y="300" class="b6">Nothing is mounted on the machine</text><text x="20" y="316" class="sm">one cable into the built-in network port</text>
+        <path class="cable" d="M222 188 V250 H420 V290"/>
+        <rect class="box" x="380" y="290" width="160" height="32" rx="4"/><text x="460" y="311" text-anchor="middle" class="b6">Switch</text>
+        <line class="dash" x1="250" y1="88" x2="300" y2="60"/>
+        <rect class="scr" x="300" y="16" width="244" height="190" rx="6"/>
+        <text x="314" y="40" class="st" style="fill:var(--accent)">COMMON</text>
+        <text x="314" y="62" class="st">IP ADDRESS  192.168.50.21</text>
+        <text x="314" y="82" class="st">SUBNET MASK 255.255.255.0</text>
+        <text x="314" y="102" class="st">ROUTER      (leave blank)</text>
+        <text x="314" y="134" class="st" style="fill:var(--accent)">FOCAS2</text>
+        <text x="314" y="156" class="st">TCP PORT    8193</text>
+        <text x="314" y="178" class="st">others      default</text>
+        <text x="314" y="198" class="st">then power off and on</text>
+      </svg>
+      <figcaption>Applies to the 4 VMCs, Puma 4100L, PV 9300, Super Jobber 500, and the Puma V550 if it has the built-in port.</figcaption>
+    </figure>
+    <div>
+      <ol class="do">
+        <li><label class="check"><input type="checkbox" data-k="s3-1"><span class="box"></span><span class="t">Machine idle, door closed. Plug the labelled cable into the built-in port; seal the cable entry.</span></label></li>
+        <li><label class="check"><input type="checkbox" data-k="s3-2"><span class="box"></span><span class="t">SYSTEM → network key → COMMON: enter the IP and mask, leave the router blank.</span></label></li>
+        <li><label class="check"><input type="checkbox" data-k="s3-3"><span class="box"></span><span class="t">FOCAS2 screen: TCP port 8193. If settings are locked, ask the maker how to enable parameter write, then lock it again.</span></label></li>
+        <li><label class="check"><input type="checkbox" data-k="s3-4"><span class="box"></span><span class="t">Switch the controller off and on.</span></label></li>
+        <li><label class="check"><input type="checkbox" data-k="s3-5"><span class="box"></span><span class="t">From the collector PC: <code>ping 192.168.50.21</code> replies, and the test read shows the same program and parts count as the machine's screen.</span></label></li>
+      </ol>
+      <table>
+        <tr><th>What the PC reads</th><th>Every</th></tr>
+        <tr><td>Running / stopped / alarm, and mode</td><td>2 to 5 s</td></tr>
+        <tr><td>Program number and name (part)</td><td>5 s</td></tr>
+        <tr><td>Parts count, cycle time</td><td>10 s</td></tr>
+        <tr><td>Alarms, spindle load</td><td>5 s</td></tr>
+        <tr><td>Run and cutting time</td><td>60 s</td></tr>
+      </table>
+      <div class="ok">Done when the machine shows on the collector with the right program and parts count.</div>
+    </div>
+  </div>
+</section>
+
+<!-- 4 -->
+<section class="step" id="type-b">
+  <div class="head"><span class="num">4</span><h2>Older CNC: fit a sensor node (type B)</h2><span class="who">Licensed electrician · machine locked out</span></div>
+  <div class="grid">
+    <figure>
+      <svg viewBox="0 0 560 350" role="img" aria-label="Sensor node in the electrical cabinet: current clamp on one phase of the spindle motor, tower lamp taps through relays, wired to an I/O module and the switch">
+        <defs><marker id="ar4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="currentColor"/></marker></defs>
+        <rect class="bgf" x="16" y="14" width="310" height="320" rx="8"/>
+        <text x="30" y="36" class="sm b6">Machine electrical cabinet</text>
+        <line x1="30" y1="96" x2="312" y2="96" stroke="var(--ink-2)" stroke-width="4"/>
+        <rect class="box" x="36" y="56" width="80" height="58" rx="4"/><text x="76" y="82" text-anchor="middle" class="b6">24 V</text><text x="76" y="99" text-anchor="middle" class="sm">power</text>
+        <rect class="acc" x="132" y="50" width="176" height="70" rx="4"/><text x="220" y="74" text-anchor="middle" class="b6">I/O module</text><text x="220" y="92" text-anchor="middle" class="sm mn">AI1 · DI1 DI2 DI3 · LAN</text><text x="220" y="108" text-anchor="middle" class="sm">192.168.50.101</text>
+        <line class="ln" x1="116" y1="85" x2="132" y2="85"/>
+        <!-- motor phases -->
+        <text x="40" y="168" class="sm">to spindle motor</text>
+        <line x1="60" y1="176" x2="60" y2="320" stroke="var(--ink-2)" stroke-width="5"/><line x1="90" y1="176" x2="90" y2="320" stroke="var(--ink-2)" stroke-width="5"/><line x1="120" y1="176" x2="120" y2="320" stroke="var(--ink-2)" stroke-width="5"/>
+        <text x="60" y="334" text-anchor="middle" class="sm">L1</text><text x="90" y="334" text-anchor="middle" class="sm">L2</text><text x="120" y="334" text-anchor="middle" class="sm">L3</text>
+        <rect x="46" y="238" width="28" height="32" rx="6" fill="none" stroke="var(--accent)" stroke-width="4"/>
+        <path d="M74 252 C150 252 160 160 170 122" fill="none" stroke="var(--accent)" stroke-width="2" stroke-dasharray="5 4"/>
+        <text x="150" y="232" class="b6">Clamp ONE phase only</text><text x="150" y="248" class="sm">all three together reads zero</text>
+        <text x="150" y="270" class="sm">4 to 20 mA → AI1</text>
+        <!-- tower light -->
+        <rect x="440" y="18" width="34" height="22" class="r" rx="3"/><rect x="440" y="42" width="34" height="22" class="a" rx="3"/><rect x="440" y="66" width="34" height="22" class="g" rx="3"/><rect x="452" y="88" width="10" height="40" fill="var(--ink-2)"/>
+        <text x="484" y="56" class="sm">tower lamps</text>
+        <rect class="box" x="360" y="150" width="120" height="44" rx="4"/><text x="420" y="170" text-anchor="middle" class="b6">Relays</text><text x="420" y="186" text-anchor="middle" class="sm">isolate each lamp</text>
+        <path class="ln" d="M457 128 V148" marker-end="url(#ar4)"/>
+        <path class="ln" d="M360 172 H250 V122" marker-end="url(#ar4)"/>
+        <text x="300" y="166" class="sm">→ DI1-3</text>
+        <path class="cable" d="M308 70 H342 V289 H368"/>
+        <rect class="box" x="370" y="272" width="160" height="34" rx="4"/><text x="450" y="294" text-anchor="middle" class="b6">Switch</text>
+      </svg>
+      <figcaption>Reads running, idle and alarm without touching the machine's control logic. For the Ace LT lathe, and the Puma V550 only if it lacks a built-in port.</figcaption>
+    </figure>
+    <div>
+      <ol class="do">
+        <li><label class="check"><input type="checkbox" data-k="s4-1"><span class="box"></span><span class="t">Isolate and lock out the machine.</span></label></li>
+        <li><label class="check"><input type="checkbox" data-k="s4-2"><span class="box"></span><span class="t">Mount the 24 V supply and I/O module on DIN rail; feed the supply from a fused point.</span></label></li>
+        <li><label class="check"><input type="checkbox" data-k="s4-3"><span class="box"></span><span class="t">Clamp the current sensor around one phase of the spindle motor supply; wire it to AI1.</span></label></li>
+        <li><label class="check"><input type="checkbox" data-k="s4-4"><span class="box"></span><span class="t">Take the green, amber and red lamp signals through relays to DI1, DI2, DI3. Never wire lamps straight in.</span></label></li>
+        <li><label class="check"><input type="checkbox" data-k="s4-5"><span class="box"></span><span class="t">Set the module to 192.168.50.101 and plug in the machine's network cable.</span></label></li>
+        <li><label class="check"><input type="checkbox" data-k="s4-6"><span class="box"></span><span class="t">Power up. Note the current at idle, light cut and heavy cut; set "running" just above idle.</span></label></li>
+      </ol>
+      <div class="warn">Optional parts count: if the machine maker can spare an end-of-program M-code output, wire it to DI4.</div>
+      <div class="ok">Done when the collector shows running when cutting, idle when stopped, and the lamp colours match.</div>
+    </div>
+  </div>
+</section>
+
+<!-- 5 -->
+<section class="step" id="type-c">
+  <div class="head"><span class="num">5</span><h2>Manual machine: clamp and button (type C)</h2><span class="who">Licensed electrician</span></div>
+  <div class="grid">
+    <figure>
+      <svg viewBox="0 0 560 300" role="img" aria-label="Manual lathe with a current clamp on the motor cable and a part-done push button, both wired to a small sensor node">
+        <rect class="mb" x="30" y="170" width="330" height="26" rx="4"/>
+        <rect class="mb" x="40" y="196" width="22" height="70"/><rect class="mb" x="326" y="196" width="22" height="70"/>
+        <rect class="mb" x="30" y="92" width="96" height="78" rx="6"/>
+        <circle cx="146" cy="131" r="24" class="mb"/>
+        <rect class="mb" x="300" y="112" width="52" height="58" rx="4"/>
+        <line x1="170" y1="131" x2="300" y2="131" stroke="var(--ink-2)" stroke-width="4"/>
+        <rect class="box" x="74" y="214" width="70" height="44" rx="4"/><text x="109" y="241" text-anchor="middle" class="b6">Motor</text>
+        <path d="M144 236 H232" stroke="var(--ink-2)" stroke-width="5" fill="none"/>
+        <rect x="178" y="224" width="26" height="24" rx="6" fill="none" stroke="var(--accent)" stroke-width="4"/>
+        <text x="160" y="280" class="sm">clamp on one phase</text>
+        <path d="M204 230 C260 200 330 110 400 90" fill="none" stroke="var(--accent)" stroke-width="2" stroke-dasharray="5 4"/>
+        <rect class="acc" x="400" y="56" width="140" height="64" rx="6"/><text x="470" y="82" text-anchor="middle" class="b6">Sensor node</text><text x="470" y="100" text-anchor="middle" class="sm">I/O module + 24 V</text>
+        <circle cx="450" cy="200" r="20" fill="var(--ok)"/><circle cx="450" cy="200" r="11" fill="none" stroke="#fff" stroke-width="2"/>
+        <text x="450" y="238" text-anchor="middle" class="b6">Part done</text><text x="450" y="254" text-anchor="middle" class="sm">operator presses</text>
+        <path class="ln" d="M450 180 V122"/>
+        <path class="cable" d="M540 88 H552 V286 H400"/>
+        <text x="410" y="278" class="sm">network cable to switch</text>
+      </svg>
+      <figcaption>Gives running and idle hours, plus a parts count from the button. Good enough for planning; no controller needed.</figcaption>
+    </figure>
+    <div>
+      <ol class="do">
+        <li><label class="check"><input type="checkbox" data-k="s5-1"><span class="box"></span><span class="t">Isolate and lock out the machine.</span></label></li>
+        <li><label class="check"><input type="checkbox" data-k="s5-2"><span class="box"></span><span class="t">Fit a small DIN-rail box near the motor starter with the 24 V supply and I/O module.</span></label></li>
+        <li><label class="check"><input type="checkbox" data-k="s5-3"><span class="box"></span><span class="t">Clamp the current sensor on one phase of the main motor cable; wire it to AI1.</span></label></li>
+        <li><label class="check"><input type="checkbox" data-k="s5-4"><span class="box"></span><span class="t">Mount a green "part done" button where the operator unloads; wire it to DI4.</span></label></li>
+        <li><label class="check"><input type="checkbox" data-k="s5-5"><span class="box"></span><span class="t">Give the node its address, connect the cable, and set the running threshold from a test cut.</span></label></li>
+      </ol>
+      <div class="ok">Done when running and idle match what you see, and each press of the button adds one part.</div>
+    </div>
+  </div>
+</section>
+
+<!-- 6 -->
+<section class="step" id="collector">
+  <div class="head"><span class="num">6</span><h2>Set up the collector PC</h2><span class="who">You or your developer</span></div>
+  <div class="grid">
+    <figure>
+      <svg viewBox="0 0 560 340" role="img" aria-label="Collector PC with six programs: two readers feed a message hub, the hub feeds a local store, the store feeds the uploader and the shop-floor screen">
+        <defs><marker id="ar6" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="currentColor"/></marker></defs>
+        <text x="10" y="70" class="b6">Machines</text><text x="10" y="86" class="sm">port 1</text><text x="10" y="100" class="sm mn">192.168.50.10</text>
+        <line class="ln" x1="104" y1="80" x2="130" y2="80" marker-end="url(#ar6)"/>
+        <rect class="bgf" x="132" y="14" width="300" height="312" rx="10"/>
+        <text x="146" y="36" class="sm b6">Collector PC · Ubuntu Server · Docker</text>
+        <rect class="box" x="146" y="52" width="130" height="50" rx="5"/><text x="211" y="73" text-anchor="middle" class="b6">FOCAS reader</text><text x="211" y="90" text-anchor="middle" class="sm">newer CNCs</text>
+        <rect class="box" x="290" y="52" width="130" height="50" rx="5"/><text x="355" y="73" text-anchor="middle" class="b6">Modbus reader</text><text x="355" y="90" text-anchor="middle" class="sm">sensor nodes</text>
+        <rect class="box" x="218" y="130" width="130" height="50" rx="5"/><text x="283" y="151" text-anchor="middle" class="b6">Message hub</text><text x="283" y="168" text-anchor="middle" class="sm">Mosquitto</text>
+        <rect class="box" x="146" y="208" width="130" height="50" rx="5"/><text x="211" y="229" text-anchor="middle" class="b6">Local store</text><text x="211" y="246" text-anchor="middle" class="sm">30 days, TimescaleDB</text>
+        <rect class="box" x="290" y="208" width="130" height="50" rx="5"/><text x="355" y="229" text-anchor="middle" class="b6">Shop-floor screen</text><text x="355" y="246" text-anchor="middle" class="sm">Grafana</text>
+        <rect class="acc" x="218" y="270" width="130" height="46" rx="5"/><text x="283" y="290" text-anchor="middle" class="b6">Uploader</text><text x="283" y="306" text-anchor="middle" class="sm">retries, no duplicates</text>
+        <path class="ln" d="M211 102 V116 H260 V128" marker-end="url(#ar6)"/>
+        <path class="ln" d="M355 102 V116 H306 V128" marker-end="url(#ar6)"/>
+        <path class="ln" d="M283 180 V194 H211 V206" marker-end="url(#ar6)"/>
+        <line class="ln" x1="276" y1="233" x2="288" y2="233" marker-end="url(#ar6)"/>
+        <path class="ln" d="M211 258 V293 H216" marker-end="url(#ar6)"/>
+        <line class="ln" x1="348" y1="293" x2="456" y2="293" marker-end="url(#ar6)"/>
+        <text x="460" y="286" class="b6">Portal</text><text x="460" y="302" class="sm">port 2, HTTPS</text>
+      </svg>
+      <figcaption>If the internet drops, readings wait in the local store and upload later. The wall screen keeps working.</figcaption>
+    </figure>
+    <div>
+      <ol class="do">
+        <li><label class="check"><input type="checkbox" data-k="s6-1"><span class="box"></span><span class="t">Install Ubuntu Server 24.04 LTS. Port 1 fixed at 192.168.50.10, port 2 automatic (from the router).</span></label></li>
+        <li><label class="check"><input type="checkbox" data-k="s6-2"><span class="box"></span><span class="t">Block routing between the ports and all incoming traffic except the hub and screen on port 1.</span></label></li>
+        <li><label class="check"><input type="checkbox" data-k="s6-3"><span class="box"></span><span class="t">Install time sync, Docker, automatic security updates, the watchdog, and remote access.</span></label></li>
+        <li><label class="check"><input type="checkbox" data-k="s6-4"><span class="box"></span><span class="t">Fill in the machine list, then start the six programs with <code>docker compose up -d</code>.</span></label></li>
+        <li><label class="check"><input type="checkbox" data-k="s6-5"><span class="box"></span><span class="t">Pull the power: everything restarts on its own when power returns.</span></label></li>
+      </ol>
+<pre># firewall and no routing
+echo 'net.ipv4.ip_forward=0' | sudo tee /etc/sysctl.d/99-noforward.conf
+sudo sysctl --system
+sudo ufw default deny incoming
+sudo ufw allow in on enp1s0 to any port 1883 proto tcp
+sudo ufw allow in on enp1s0 to any port 3000 proto tcp
+sudo ufw enable
+sudo apt install chrony docker.io docker-compose-v2 unattended-upgrades</pre>
+<pre># config/machines.yaml (one entry per machine)
+- id: MC18
+  name: VMC M/C 18
+  method: focas
+  ip: 192.168.50.21
+- id: LT-LATHE
+  method: modbus
+  ip: 192.168.50.101
+  running_threshold_amps: 4.0</pre>
+      <div class="ok">Done when all pilot machines show live on the shop-floor screen.</div>
+    </div>
+  </div>
+</section>
+
+<!-- 7 -->
+<section class="step" id="cloud">
+  <div class="head"><span class="num">7</span><h2>Send data to the cloud dashboard</h2><span class="who">Your developer</span></div>
+  <div class="grid">
+    <figure>
+      <svg viewBox="0 0 560 330" role="img" aria-label="A small reading message goes from the collector to the portal database, which joins it with the customer backlog and draws the live board">
+        <defs><marker id="ar7" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="currentColor"/></marker></defs>
+        <rect class="scr" x="10" y="30" width="196" height="150" rx="8"/>
+        <text x="22" y="54" class="st">{ "machine": "MC18",</text>
+        <text x="22" y="74" class="st">  "status": "running",</text>
+        <text x="22" y="94" class="st">  "program":</text>
+        <text x="22" y="114" class="st">   "436-5367 BUSHING",</text>
+        <text x="22" y="134" class="st">  "parts": 27,</text>
+        <text x="22" y="154" class="st">  "cycle_s": 922 }</text>
+        <text x="10" y="200" class="sm">POST /api/v1/machine-data</text><text x="10" y="215" class="sm">with the collector's token</text>
+        <line class="ln" x1="206" y1="100" x2="240" y2="100" marker-end="url(#ar7)"/>
+        <path class="box" d="M244 70 a44 12 0 0 1 88 0 V130 a44 12 0 0 1 -88 0z"/><ellipse class="box" cx="288" cy="70" rx="44" ry="12"/>
+        <text x="288" y="110" text-anchor="middle" class="b6">Machine</text><text x="288" y="126" text-anchor="middle" class="b6">readings</text>
+        <path class="box" d="M244 210 a44 12 0 0 1 88 0 V260 a44 12 0 0 1 -88 0z"/><ellipse class="box" cx="288" cy="210" rx="44" ry="12"/>
+        <text x="288" y="246" text-anchor="middle" class="b6">Backlog</text><text x="288" y="292" text-anchor="middle" class="sm">Cat schedule uploads</text>
+        <line class="ln" x1="332" y1="100" x2="360" y2="100" marker-end="url(#ar7)"/>
+        <path class="ln" d="M332 236 H346 V120 H360" marker-end="url(#ar7)"/>
+        <rect class="box" x="362" y="20" width="190" height="230" rx="8"/>
+        <text x="374" y="42" class="b6">Live board</text>
+        <rect class="g" x="374" y="54" width="80" height="44" rx="4"/><text x="414" y="72" text-anchor="middle" class="tw">M/C 18</text><text x="414" y="88" text-anchor="middle" class="tw" style="font-weight:400">running</text>
+        <rect class="g" x="462" y="54" width="80" height="44" rx="4"/><text x="502" y="72" text-anchor="middle" class="tw">PV 9300</text><text x="502" y="88" text-anchor="middle" class="tw" style="font-weight:400">running</text>
+        <rect class="a" x="374" y="106" width="80" height="44" rx="4"/><text x="414" y="124" text-anchor="middle" class="tw">4100L</text><text x="414" y="140" text-anchor="middle" class="tw" style="font-weight:400">idle 12 min</text>
+        <rect class="r" x="462" y="106" width="80" height="44" rx="4"/><text x="502" y="124" text-anchor="middle" class="tw">LT lathe</text><text x="502" y="140" text-anchor="middle" class="tw" style="font-weight:400">alarm</text>
+        <rect class="bgf" x="374" y="160" width="168" height="78" rx="4"/>
+        <text x="382" y="180" class="sm b6">Late part → machine</text>
+        <text x="382" y="198" class="sm">4365367-02 · 24 late</text><text x="382" y="214" class="sm">running on M/C 15 now</text>
+        <text x="362" y="272" class="sm">Example values for illustration</text>
+      </svg>
+      <figcaption>Small messages go up only when something changes, plus a snapshot every minute. The portal joins them with the customer backlog.</figcaption>
+    </figure>
+    <div>
+      <ol class="do">
+        <li><label class="check"><input type="checkbox" data-k="s7-1"><span class="box"></span><span class="t">Build the endpoint <code>POST /api/v1/machine-data</code>: accepts batches, checks the collector's token, ignores ids it already has, replies with the ids saved.</span></label></li>
+        <li><label class="check"><input type="checkbox" data-k="s7-2"><span class="box"></span><span class="t">Create the tables: machines, status changes, counts, alarms, snapshots, stop reasons, program-to-part map, collectors.</span></label></li>
+        <li><label class="check"><input type="checkbox" data-k="s7-3"><span class="box"></span><span class="t">Build the live board: one box per machine, green running, amber idle, red alarm, grey offline.</span></label></li>
+        <li><label class="check"><input type="checkbox" data-k="s7-4"><span class="box"></span><span class="t">Add utilisation by shift, output by part, and top stop reasons.</span></label></li>
+        <li><label class="check"><input type="checkbox" data-k="s7-5"><span class="box"></span><span class="t">Map program names to customer parts, so late Cat parts show the machine running them.</span></label></li>
+        <li><label class="check"><input type="checkbox" data-k="s7-6"><span class="box"></span><span class="t">Alerts on WhatsApp or email: bottleneck machine in alarm over 15 min, or collector silent.</span></label></li>
+      </ol>
+      <div class="ok">Done when the live board matches the shop-floor screen within a few seconds.</div>
+    </div>
+  </div>
+</section>
+
+<!-- 8 -->
+<section class="step" id="tablet">
+  <div class="head"><span class="num">8</span><h2>Tablets: why did it stop?</h2><span class="who">Supervisor + operators</span></div>
+  <div class="grid">
+    <figure>
+      <svg viewBox="0 0 560 330" role="img" aria-label="Tablet screen asking why M/C 18 is stopped, with large reason buttons">
+        <rect class="box" x="110" y="10" width="340" height="310" rx="20"/>
+        <rect class="bgf" x="128" y="28" width="304" height="274" rx="8"/>
+        <text x="146" y="56" class="b6" style="font-size:16px">Why is M/C 18 stopped?</text>
+        <text x="146" y="74" class="sm">stopped 7 min · Ravi, shift A</text>
+        <rect class="acc" x="146" y="88" width="132" height="40" rx="6"/><text x="212" y="113" text-anchor="middle" class="b6">Setting</text>
+        <rect class="box" x="286" y="88" width="132" height="40" rx="6"/><text x="352" y="113" text-anchor="middle">Tool change</text>
+        <rect class="box" x="146" y="136" width="132" height="40" rx="6"/><text x="212" y="161" text-anchor="middle">No material</text>
+        <rect class="box" x="286" y="136" width="132" height="40" rx="6"/><text x="352" y="161" text-anchor="middle">Inspection</text>
+        <rect class="box" x="146" y="184" width="132" height="40" rx="6"/><text x="212" y="209" text-anchor="middle">Waiting crane</text>
+        <rect class="box" x="286" y="184" width="132" height="40" rx="6"/><text x="352" y="209" text-anchor="middle">No operator</text>
+        <rect class="box" x="146" y="232" width="132" height="40" rx="6"/><text x="212" y="257" text-anchor="middle">Breakdown</text>
+        <rect class="box" x="286" y="232" width="132" height="40" rx="6"/><text x="352" y="257" text-anchor="middle">Power cut</text>
+      </svg>
+      <figcaption>The tablet asks only when a stop lasts more than 5 minutes. One tap answers it. Name shown is an example.</figcaption>
+    </figure>
+    <div>
+      <ol class="do">
+        <li><label class="check"><input type="checkbox" data-k="s8-1"><span class="box"></span><span class="t">Mount one tablet per pilot machine, later one per 2 or 3 machines that sit together.</span></label></li>
+        <li><label class="check"><input type="checkbox" data-k="s8-2"><span class="box"></span><span class="t">Operators pick their name and a 4-digit PIN at shift start.</span></label></li>
+        <li><label class="check"><input type="checkbox" data-k="s8-3"><span class="box"></span><span class="t">Agree the reason buttons with the supervisor; keep them to about eight.</span></label></li>
+        <li><label class="check"><input type="checkbox" data-k="s8-4"><span class="box"></span><span class="t">At shift end, operators enter rejected parts.</span></label></li>
+        <li><label class="check"><input type="checkbox" data-k="s8-5"><span class="box"></span><span class="t">Review the reasons monthly; merge the ones nobody uses.</span></label></li>
+      </ol>
+      <div class="ok">Done when most stops over 5 minutes have a reason by the end of each shift.</div>
+    </div>
+  </div>
+</section>
+
+<!-- 9 -->
+<section class="step" id="pilot">
+  <div class="head"><span class="num">9</span><h2>Pilot on three machines, then roll out</h2><span class="who">You + your uncle</span></div>
+  <div class="grid wide">
+    <figure>
+      <svg viewBox="0 0 900 230" role="img" aria-label="Four-week pilot: install and test in week 1, run beside paper in weeks 2 and 3, review in week 4, then roll out">
+        <text x="20" y="30" class="sm">Pilot machines: VMC M/C 18 · Puma 4100L · PV 9300</text>
+        <line x1="230" y1="44" x2="230" y2="214" stroke="var(--line)"/><line x1="380" y1="44" x2="380" y2="214" stroke="var(--line)"/><line x1="530" y1="44" x2="530" y2="214" stroke="var(--line)"/><line x1="680" y1="44" x2="680" y2="214" stroke="var(--line)"/><line x1="830" y1="44" x2="830" y2="214" stroke="var(--line)"/>
+        <text x="305" y="58" text-anchor="middle" class="sm b6">Week 1</text><text x="455" y="58" text-anchor="middle" class="sm b6">Week 2</text><text x="605" y="58" text-anchor="middle" class="sm b6">Week 3</text><text x="755" y="58" text-anchor="middle" class="sm b6">Week 4</text><text x="866" y="58" text-anchor="middle" class="sm b6">After</text>
+        <text x="20" y="96" class="b6">Install and test</text><rect class="acc" x="234" y="80" width="142" height="24" rx="5"/>
+        <text x="20" y="136" class="b6">Run beside paper</text><rect class="box" x="384" y="120" width="292" height="24" rx="5"/>
+        <text x="20" y="176" class="b6">Review with uncle</text><rect class="box" x="684" y="160" width="142" height="24" rx="5"/>
+        <text x="20" y="208" class="b6">Roll out the rest</text><path d="M834 200 H892" stroke="var(--ok)" stroke-width="6" stroke-linecap="round"/>
+      </svg>
+      <figcaption>Connect the rest only when the system's daily counts match the hand-filled board.</figcaption>
+    </figure>
+    <div class="grid">
+      <ol class="do">
+        <li><label class="check"><input type="checkbox" data-k="s9-1"><span class="box"></span><span class="t">Week 1: install, test cables, connect the three pilot machines, pull the internet for an hour and check nothing is lost.</span></label></li>
+        <li><label class="check"><input type="checkbox" data-k="s9-2"><span class="box"></span><span class="t">Weeks 2 and 3: compare daily parts count with the paper board; fix any differences.</span></label></li>
+        <li><label class="check"><input type="checkbox" data-k="s9-3"><span class="box"></span><span class="t">Week 4: sit with your uncle on his tablet: utilisation, top stop reasons, cycle times per part.</span></label></li>
+      </ol>
+      <ol class="do">
+        <li><label class="check"><input type="checkbox" data-k="s9-4"><span class="box"></span><span class="t">Roll out: remaining newer CNCs, then sensor nodes, then tablets on every machine.</span></label></li>
+        <li><label class="check"><input type="checkbox" data-k="s9-5"><span class="box"></span><span class="t">Weekly: check every machine reported in the last 24 hours.</span></label></li>
+        <li><label class="check"><input type="checkbox" data-k="s9-6"><span class="box"></span><span class="t">Keep a spare collector PC, switch and cables in stock.</span></label></li>
+      </ol>
+    </div>
+    <div class="warn">Before touching any controller: ask each machine maker (BFW, Ace Micromatic, DN Solutions, Ace Designers) about warranty, and check whether AMS MachineConnect is already active. The system only reads; it never sends programs or changes settings.</div>
+  </div>
+</section>
+
+<footer>Built from shop-floor photos of 16 Nov 2026. Confirm each machine's network screen during the survey before buying hardware. Full technical detail is in the companion setup document.</footer>
+</main>
+
+<script>
+(function(){
+  var KEY='newall-guide-v1', state={};
+  try{ state=JSON.parse(localStorage.getItem(KEY)||'{}')||{}; }catch(e){ state={}; }
+  var boxes=[].slice.call(document.querySelectorAll('input[type=checkbox][data-k]'));
+  function save(){ try{ localStorage.setItem(KEY, JSON.stringify(state)); }catch(e){} }
+  function update(){
+    var done=0;
+    boxes.forEach(function(b){ if(b.checked) done++; });
+    document.getElementById('ptext').textContent=done+' of '+boxes.length+' done';
+    document.getElementById('pbar').style.width=(boxes.length? (100*done/boxes.length):0)+'%';
+    [].forEach.call(document.querySelectorAll('.chip'), function(c){
+      var sec=document.getElementById(c.getAttribute('data-s'));
+      var inside=sec? [].slice.call(sec.querySelectorAll('input[type=checkbox]')) : [];
+      var all=inside.length>0 && inside.every(function(i){ return i.checked; });
+      c.classList.toggle('done', all);
+    });
+  }
+  boxes.forEach(function(b){
+    b.checked=!!state[b.getAttribute('data-k')];
+    b.addEventListener('change', function(){ state[b.getAttribute('data-k')]=b.checked; save(); update(); });
+  });
+  update();
+  function go(){ var id=location.hash.slice(1); var el=id && document.getElementById(id); if(el){ el.scrollIntoView(); } }
+  window.addEventListener('hashchange', go);
+  if(location.hash) setTimeout(go, 50);
+})();
+</script>
+</body>
+</html>
